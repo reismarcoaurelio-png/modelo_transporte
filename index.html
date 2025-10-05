@@ -1,0 +1,224 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8"/>
+<title>Transporte Step Stone - Interativo Completo</title>
+<style>
+body { font-family: Arial, Helvetica, sans-serif; padding:18px; background:#f6f9fc; color:#0b2545; }
+h1{margin-bottom:6px;}
+.card{background:#fff;padding:12px;border-radius:8px;box-shadow:0 6px 18px rgba(11,37,69,0.06);margin-bottom:12px}
+label{display:inline-block;margin-right:10px}
+input[type=number], input[type=text], select{width:80px;padding:6px;border:1px solid #cbd5e1;border-radius:6px}
+input.incorrect{border-color:#dc2626;background:#fee2e2}
+button{padding:8px 12px;border-radius:6px;border:none;background:#2563eb;color:#fff;cursor:pointer;margin-right:6px}
+button.ghost{background:#64748b}
+table{border-collapse:collapse;margin-top:8px;width:100%}
+th,td{border:1px solid #e2e8f0;padding:6px;text-align:center;font-size:13px}
+caption{font-weight:bold;margin-bottom:6px;text-align:left}
+.status{margin-top:10px;padding:8px;border-radius:6px}
+.ok{background:#ecfccb;color:#14532d}
+.err{background:#fee2e2;color:#7f1d1d}
+.prevTable input{background:#f3f4f6;border-color:#e2e8f0}
+.note{font-size:13px;color:#334155;margin-top:8px}
+#finalScore{font-weight:bold;margin-top:12px}
+</style>
+</head>
+<body>
+
+<h1>Transporte Step Stone - Interativo Completo</h1>
+
+<div class="card">
+  <label>Nome do aluno: <input id="studentName" type="text" placeholder="Digite seu nome"></label>
+  <div style="margin-top:10px">
+    <label>Linhas (origens): <input id="input_m" type="number" min="1" value="2"></label>
+    <label>Colunas (destinos): <input id="input_n" type="number" min="1" value="3"></label>
+    <label>Método inicial: 
+      <select id="initMethod">
+        <option value="nw">Canto Noroeste</option>
+        <option value="min">Custo Mínimo</option>
+      </select>
+    </label>
+    <button id="genForm" class="ghost">Gerar Tabela</button>
+  </div>
+  <div id="dynamicForm" style="margin-top:12px"></div>
+  <div style="margin-top:12px">
+    <button id="start">Iniciar Iterações</button>
+    <button id="restart" class="ghost" style="display:none">Reiniciar</button>
+  </div>
+</div>
+
+<div id="iterationsArea" class="card" style="display:none"></div>
+<div id="feedback" class="status" style="display:none"></div>
+<div id="finalScore"></div>
+<div style="margin-top:12px">
+  <button id="generatePDF" style="display:none">Gerar PDF</button>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+<script>
+// util
+function numFrom(id,fallback=0){ const el=document.getElementById(id); if(!el) return fallback; const v=parseFloat(el.value); return Number.isFinite(v)?v:fallback; }
+
+// globais
+let m=2, n=3;
+let studentName='';
+let costMatrix=[], supply=[], demand=[];
+let autoIterations=[], currentIter=0, score=0, totalChecks=0;
+
+// gera formulário
+function generateForm(){
+  m = Math.max(1, Math.floor(numFrom('input_m',2)));
+  n = Math.max(1, Math.floor(numFrom('input_n',3)));
+  studentName=document.getElementById('studentName').value.trim()||'Aluno';
+
+  const container=document.getElementById('dynamicForm');
+  container.innerHTML='';
+
+  // Tabela de custos e oferta/demanda
+  const card=document.createElement('div'); card.className='card';
+  card.innerHTML='<div class="small"><strong>Matriz de Custos</strong> (preencha os custos e os totais)</div>';
+  const tbl=document.createElement('table'); 
+  let head=`<tr><th>Origem\\Destino</th>`;
+  for(let j=0;j<n;j++) head+=`<th>D${j+1}</th>`; head+='<th>Oferta</th></tr>'; tbl.innerHTML=head;
+
+  costMatrix=Array.from({length:m},()=>Array(n).fill(0));
+  supply=Array(m).fill(0);
+  demand=Array(n).fill(0);
+
+  for(let i=0;i<m;i++){
+    const tr=document.createElement('tr'); 
+    let row=`<td>O${i+1}</td>`;
+    for(let j=0;j<n;j++){
+      row+=`<td><input id="c_${i}_${j}" type="number" value=""></td>`;
+    }
+    row+=`<td><input id="s_${i}" type="number" value=""></td>`;
+    tr.innerHTML=row; tbl.appendChild(tr);
+  }
+
+  // demanda
+  const trd=document.createElement('tr'); let rowd=`<td>Demanda</td>`;
+  for(let j=0;j<n;j++){ rowd+=`<td><input id="d_${j}" type="number" value=""></td>`; }
+  rowd+='<td></td>'; trd.innerHTML=rowd; tbl.appendChild(trd);
+  card.appendChild(tbl);
+  container.appendChild(card);
+}
+
+// montar problema inicial vazio
+function montarProblema(){
+  costMatrix=Array.from({length:m},()=>Array(n).fill(0));
+  supply=Array(m).fill(0);
+  demand=Array(n).fill(0);
+  for(let i=0;i<m;i++) for(let j=0;j<n;j++) costMatrix[i][j]=numFrom(`c_${i}_${j}`,0);
+  for(let i=0;i<m;i++) supply[i]=numFrom(`s_${i}`,0);
+  for(let j=0;j<n;j++) demand[j]=numFrom(`d_${j}`,0);
+}
+
+// gerar iteração (estrutura para aluno preencher)
+function generateIteration(){
+  const x=Array.from({length:m},()=>Array(n).fill('')); // alocações
+  const u=Array(m).fill(''); // valores duais linha
+  const v=Array(n).fill(''); // valores duais coluna
+  return {x,u,v};
+}
+
+// salvar iteração
+function saveAutoIteration(it){ autoIterations.push(it); }
+
+// render iteração aluno
+function renderStudentIteration(idx){
+  const area=document.getElementById('iterationsArea'); area.style.display='block'; area.innerHTML='';
+  const it=autoIterations[idx];
+
+  const tbl=document.createElement('table'); 
+  let trh='<tr><th>Origem\\Destino</th>';
+  for(let j=0;j<n;j++) trh+=`<th>D${j+1}</th>`; trh+='<th>Oferta</th><th>u_i</th></tr>'; tbl.innerHTML=trh;
+
+  for(let i=0;i<m;i++){
+    const tr=document.createElement('tr'); let row=`<td>O${i+1}</td>`;
+    for(let j=0;j<n;j++){
+      row+=`<td><input id="x_${i}_${j}" type="text" value=""></td>`;
+    }
+    row+=`<td><input id="s_${i}" type="text" value="${supply[i]}" readonly></td>`;
+    row+=`<td><input id="u_${i}" type="text" value=""></td>`;
+    tr.innerHTML=row; tbl.appendChild(tr);
+  }
+
+  const trd=document.createElement('tr'); let rowd=`<td>Demanda</td>`;
+  for(let j=0;j<n;j++){ rowd+=`<td><input id="d_${j}" type="text" value="${demand[j]}" readonly></td>`; }
+  rowd+='<td></td><td>v_j</td>'; trd.innerHTML=rowd; tbl.appendChild(trd);
+  area.appendChild(tbl);
+
+  const vRow=document.createElement('table'); vRow.innerHTML='<tr><td>v_j</td>'+Array.from({length:n},(_,j)=>`<td><input id="v_${j}" type="text" value=""></td>`).join('')+'</tr>';
+  area.appendChild(vRow);
+
+  const btn=document.createElement('button'); btn.innerText='Verificar Iteração';
+  btn.onclick=()=>checkIteration(idx); area.appendChild(btn);
+  document.getElementById('restart').style.display='inline-block';
+}
+
+// verificação célula a célula (alocações, u,v, custos reduzidos)
+function checkIteration(idx){
+  const it=autoIterations[idx];
+  let correct=true;
+  // alocações
+  for(let i=0;i<m;i++){
+    for(let j=0;j<n;j++){
+      const el=document.getElementById(`x_${i}_${j}`);
+      let val=parseFloat(el.value.replace(',','.'));
+      if(!Number.isFinite(val) || val<0){ el.classList.add('incorrect'); correct=false; } else el.classList.remove('incorrect');
+    }
+  }
+  // u_i
+  for(let i=0;i<m;i++){
+    const el=document.getElementById(`u_${i}`);
+    let val=parseFloat(el.value.replace(',','.'));
+    if(!Number.isFinite(val)){ el.classList.add('incorrect'); correct=false; } else el.classList.remove('incorrect');
+  }
+  // v_j
+  for(let j=0;j<n;j++){
+    const el=document.getElementById(`v_${j}`);
+    let val=parseFloat(el.value.replace(',','.'));
+    if(!Number.isFinite(val)){ el.classList.add('incorrect'); correct=false; } else el.classList.remove('incorrect');
+  }
+  totalChecks++; if(correct) score++;
+  const feedback=document.getElementById('feedback'); feedback.style.display='block';
+  feedback.className=correct?'status ok':'status err';
+  feedback.innerText=correct?`Iteração válida!`: `Há células incorretas ou não preenchidas.`;
+  if(idx+1<autoIterations.length){ currentIter++; renderStudentIteration(currentIter); }
+  else{ document.getElementById('generatePDF').style.display='inline-block'; feedback.innerText+=' Fim do exercício.'; }
+}
+
+// PDF
+function generatePDFReport(){
+  const { jsPDF } = window.jspdf;
+  const doc = new jsPDF();
+  doc.setFontSize(12); let y=10;
+  doc.text(`Aluno: ${studentName}`,10,y); y+=8;
+  doc.text(`Pontuação: ${score} / ${totalChecks}`,10,y); y+=10;
+  autoIterations.forEach((it,i)=>{
+    doc.text(`Iteração ${i+1}:`,10,y); y+=6;
+    for(let ii=0;ii<m;ii++){
+      const row=Array.from({length:n},(_,j)=>document.getElementById(`x_${ii}_${j}`).value||'0').join(' | ');
+      doc.text(`O${ii+1}: ${row}  | u${ii}=${document.getElementById(`u_${ii}`).value||'0'}`,12,y); y+=6;
+    }
+    const vrow=Array.from({length:n},(_,j)=>document.getElementById(`v_${j}`).value||'0').join(' | ');
+    doc.text(`v_j: ${vrow}`,12,y); y+=8;
+  });
+  doc.save(`${studentName}_Transporte_StepStone.pdf`);
+}
+
+// eventos
+document.getElementById('genForm').onclick = generateForm;
+document.getElementById('start').onclick = ()=>{
+  montarProblema();
+  const it=generateIteration();
+  saveAutoIteration(it);
+  currentIter=0; score=0; totalChecks=0;
+  renderStudentIteration(currentIter);
+};
+document.getElementById('restart').onclick = ()=>{ currentIter=0; score=0; totalChecks=0; renderStudentIteration(currentIter); };
+document.getElementById('generatePDF').onclick = generatePDFReport;
+</script>
+
+</body>
+</html>
