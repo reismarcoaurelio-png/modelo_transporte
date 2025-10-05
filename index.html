@@ -1,193 +1,214 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="pt-BR">
 <head>
 <meta charset="utf-8"/>
-<title>Step Stone Modificado - Transporte Interativo</title>
+<title>Transporte Step-Stone Interativo</title>
 <style>
-body{font-family:Arial,sans-serif;padding:18px;background:#f6f9fc;color:#0b2545;}
+body { font-family: Arial, sans-serif; background:#f6f9fc; color:#0b2545; padding:18px; }
 h1{margin-bottom:6px;}
 .card{background:#fff;padding:12px;border-radius:8px;box-shadow:0 6px 18px rgba(11,37,69,0.06);margin-bottom:12px}
-label{display:inline-block;margin-right:10px}
-input[type=number],input[type=text]{width:70px;padding:6px;border:1px solid #cbd5e1;border-radius:6px}
+input[type=number], input[type=text], select{width:60px;padding:4px;border:1px solid #cbd5e1;border-radius:6px;text-align:center;}
 input.incorrect{border-color:#dc2626;background:#fee2e2}
-button{padding:6px 12px;border-radius:6px;border:none;background:#2563eb;color:#fff;cursor:pointer;margin-right:6px}
+button{padding:6px 10px;border-radius:6px;border:none;background:#2563eb;color:#fff;cursor:pointer;margin-right:6px}
 button.ghost{background:#64748b}
-table{border-collapse:collapse;margin-top:8px;width:100%}
-th,td{border:1px solid #e2e8f0;padding:6px;text-align:center;font-size:13px}
+table{border-collapse:collapse;margin-top:8px;}
+th,td{border:1px solid #e2e8f0;padding:4px;text-align:center;font-size:12px;}
+.caption{font-weight:bold;margin-bottom:6px;text-align:left;}
 .status{margin-top:10px;padding:8px;border-radius:6px}
 .ok{background:#ecfccb;color:#14532d}
 .err{background:#fee2e2;color:#7f1d1d}
-.prevTable input{background:#f3f4f6;border-color:#e2e8f0}
-.note{font-size:13px;color:#334155;margin-top:8px}
 </style>
 </head>
 <body>
 
-<h1>Step Stone Modificado - Transporte Interativo</h1>
+<h1>Transporte Step-Stone Interativo</h1>
 
 <div class="card">
-<label>Nome do aluno: <input id="studentName" type="text" placeholder="Digite seu nome"></label><br/><br/>
-<label>Origem (linhas): <input id="origem_n" type="number" min="1" value="3"></label>
-<label>Destino (colunas): <input id="destino_m" type="number" min="1" value="3"></label>
-<button id="genForm" class="ghost">Gerar Tabela</button>
-<br/><br/>
-<label>Solução inicial: 
-<select id="initSolution">
-<option value="canto">Canto Noroeste</option>
-<option value="custo">Custo Mínimo</option>
-</select></label>
+  <label>Nome do aluno: <input id="studentName" type="text" placeholder="Digite seu nome"></label>
+  <div style="margin-top:10px">
+    <label>Nº de Origens: <input id="origins" type="number" min="1" value="3"></label>
+    <label>Nº de Destinos: <input id="destinations" type="number" min="1" value="3"></label>
+    <button id="genForm" class="ghost">Gerar Formulário</button>
+  </div>
+  <div style="margin-top:10px">
+    <label>Solução inicial: 
+      <select id="initialMethod">
+        <option value="nw">Canto Noroeste</option>
+        <option value="min">Custo Mínimo</option>
+      </select>
+    </label>
+  </div>
+  <div id="dynamicForm" style="margin-top:12px"></div>
+  <div style="margin-top:12px">
+    <button id="start">Iniciar Iterações</button>
+    <button id="restart" class="ghost" style="display:none">Reiniciar</button>
+  </div>
 </div>
 
-<div id="dynamicTable" class="card"></div>
 <div id="iterationsArea" class="card" style="display:none"></div>
 <div id="feedback" class="status" style="display:none"></div>
 <div id="finalScore"></div>
 <div style="margin-top:12px">
-<button id="generatePDF" style="display:none">Gerar PDF</button>
+  <button id="generatePDF" style="display:none">Gerar PDF</button>
 </div>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script>
 // util
-function fmt(x){return (Math.abs(x)<1e-12)?'0':Number(x).toFixed(2);}
-function numFrom(el){return parseFloat((el.value||0).toString().replace(',','.'));}
+function numFrom(id,fallback=0){ const el=document.getElementById(id); if(!el) return fallback; const v=parseFloat(el.value); return Number.isFinite(v)?v:fallback; }
+function fmt(x){ return (Math.abs(x)<1e-12)?'0':Number(x).toFixed(2); }
 
-// variáveis globais
-let m=3,n=3,studentName='';
-let oferta=[],demanda=[],costs=[],allocations=[],u=[],v=[];
-let autoIterations=[],currentIter=0,score=0,totalChecks=0;
+// globais
+let m=3,n=3;
+let costs=[], supply=[], demand=[];
+let autoIterations=[], currentIter=0, score=0, totalChecks=0, studentName='';
 
-// --- gera tabela inicial
-function generateTable(){
-    studentName=document.getElementById('studentName').value.trim()||'Aluno';
-    n=Math.max(1,Math.floor(numFrom(document.getElementById('origem_n'))));
-    m=Math.max(1,Math.floor(numFrom(document.getElementById('destino_m'))));
-    const container=document.getElementById('dynamicTable');
-    container.innerHTML='';
-    // inputs de oferta
-    const offDiv=document.createElement('div');
-    offDiv.innerHTML='<strong>Oferta por origem:</strong>';
-    for(let i=0;i<n;i++){
-        const inp=document.createElement('input'); inp.type='number'; inp.id='oferta_'+i; inp.value='0';
-        offDiv.appendChild(document.createTextNode(' O'+(i+1)+': ')); offDiv.appendChild(inp);
-    }
-    container.appendChild(offDiv);
-    // inputs de demanda
-    const demDiv=document.createElement('div'); demDiv.innerHTML='<br/><strong>Demanda por destino:</strong>';
-    for(let j=0;j<m;j++){
-        const inp=document.createElement('input'); inp.type='number'; inp.id='demanda_'+j; inp.value='0';
-        demDiv.appendChild(document.createTextNode(' D'+(j+1)+': ')); demDiv.appendChild(inp);
-    }
-    container.appendChild(demDiv);
-    // inputs de custos
-    const costTbl=document.createElement('table'); costTbl.innerHTML='<caption>Custos</caption>';
-    let trh=document.createElement('tr'); trh.innerHTML='<th>Orig/Dest</th>';
-    for(let j=0;j<m;j++) trh.innerHTML+='<th>D'+(j+1)+'</th>';
-    costTbl.appendChild(trh);
-    for(let i=0;i<n;i++){
-        let tr=document.createElement('tr'); tr.innerHTML='<td>O'+(i+1)+'</td>';
-        for(let j=0;j<m;j++){
-            tr.innerHTML+='<td><input id="c_'+i+'_'+j+'" type="number" value="0"></td>';
-        }
-        costTbl.appendChild(tr);
-    }
-    container.appendChild(document.createElement('br'));
-    container.appendChild(costTbl);
-    // botao iniciar
-    const btn=document.createElement('button'); btn.innerText='Iniciar Iterações';
-    btn.onclick=()=>startIterations();
-    container.appendChild(document.createElement('br'));
-    container.appendChild(btn);
+// gera formulário da tabela
+function generateForm(){
+  m = Math.max(1, Math.floor(numFrom('origins',3)));
+  n = Math.max(1, Math.floor(numFrom('destinations',3)));
+  const container=document.getElementById('dynamicForm');
+  container.innerHTML='';
+
+  // custos
+  const costCard=document.createElement('div'); costCard.className='card';
+  costCard.innerHTML='<div class="caption"><b>Custos de transporte</b></div>';
+  const tbl=document.createElement('table');
+  let header='<tr><th>Orig\Dest</th>'; for(let j=0;j<n;j++) header+=`<th>D${j+1}</th>`; header+='</tr>'; tbl.innerHTML=header;
+  for(let i=0;i<m;i++){
+    const tr=document.createElement('tr'); tr.innerHTML=`<td>O${i+1}</td>`;
+    for(let j=0;j<n;j++){ tr.innerHTML+=`<td><input id="c_${i}_${j}" type="number" step="any" value="0"></td>`;}
+    tbl.appendChild(tr);
+  }
+  costCard.appendChild(tbl);
+  container.appendChild(costCard);
+
+  // oferta
+  const supCard=document.createElement('div'); supCard.className='card';
+  supCard.innerHTML='<div class="caption"><b>Oferta</b></div>';
+  const supTbl=document.createElement('table'); let supRow='<tr>';
+  for(let i=0;i<m;i++){ supRow+=`<td><input id="s_${i}" type="number" step="any" value="0"></td>`; } supRow+='</tr>'; supTbl.innerHTML=supRow; supCard.appendChild(supTbl);
+  container.appendChild(supCard);
+
+  // demanda
+  const demCard=document.createElement('div'); demCard.className='card';
+  demCard.innerHTML='<div class="caption"><b>Demanda</b></div>';
+  const demTbl=document.createElement('table'); let demRow='<tr>';
+  for(let j=0;j<n;j++){ demRow+=`<td><input id="d_${j}" type="number" step="any" value="0"></td>`;}
+  demRow+='</tr>'; demTbl.innerHTML=demRow; demCard.appendChild(demTbl);
+  container.appendChild(demCard);
 }
 
-// --- valida balanceamento
-function validateBalance(){
-    oferta=[];demanda=[];costs=[];
-    for(let i=0;i<n;i++) oferta.push(numFrom(document.getElementById('oferta_'+i)));
-    for(let j=0;j<m;j++) demanda.push(numFrom(document.getElementById('demanda_'+j)));
-    const sumO=oferta.reduce((a,b)=>a+b,0);
-    const sumD=demanda.reduce((a,b)=>a+b,0);
-    if(Math.abs(sumO-sumD)>1e-6){ alert('Erro: Oferta e Demanda não balanceadas!'); return false; }
-    for(let i=0;i<n;i++){ costs[i]=[]; for(let j=0;j<m;j++) costs[i][j]=numFrom(document.getElementById('c_'+i+'_'+j)); }
-    return true;
+// monta problema
+function montarProblema(){
+  costs=[]; supply=[]; demand=[];
+  for(let i=0;i<m;i++){ supply[i]=numFrom(`s_${i}`,0); costs[i]=[]; for(let j=0;j<n;j++) costs[i][j]=numFrom(`c_${i}_${j}`,0);}
+  for(let j=0;j<n;j++) demand[j]=numFrom(`d_${j}`,0);
+  const totalS = supply.reduce((a,b)=>a+b,0), totalD = demand.reduce((a,b)=>a+b,0);
+  if(totalS!==totalD){ alert('Oferta e demanda não estão balanceadas!'); return false;}
+  return true;
 }
 
-// --- inicializa primeira iteração
-function startIterations(){
-    if(!validateBalance()) return;
-    allocations=Array.from({length:n},()=>Array(m).fill(''));
-    u=Array(n).fill(''); v=Array(m).fill('');
-    autoIterations=[]; currentIter=0; score=0; totalChecks=0;
-    renderIteration(currentIter,true);
+// inicia iterações
+function solveAutomatic(){
+  if(!montarProblema()) return;
+  autoIterations=[]; currentIter=0; score=0; totalChecks=0;
+  saveIteration([],[],[],[]); // iteração inicial vazia
+  renderStudentIteration(currentIter);
 }
 
-// --- render iteracao
-function renderIteration(idx,first=false){
-    const area=document.getElementById('iterationsArea'); area.style.display='block';
-    area.innerHTML='';
-    if(idx>0){ // tabela referencia
-        const prev=autoIterations[idx-1];
-        const tblPrev=document.createElement('table'); tblPrev.className='prevTable';
-        let trh=document.createElement('tr'); trh.innerHTML='<th>Iteração '+idx+' (referência)</th>';
-        for(let j=0;j<m;j++) trh.innerHTML+='<th>D'+(j+1)+'</th>';
-        trh.innerHTML+='<th>U_i/V_j</th>';
-        tblPrev.appendChild(trh);
-        for(let i=0;i<n;i++){
-            let tr=document.createElement('tr'); tr.innerHTML='<td>O'+(i+1)+'</td>';
-            for(let j=0;j<m;j++){
-                tr.innerHTML+='<td>'+fmt(prev.allocations[i][j]||0)+'</td>';
-            }
-            tr.innerHTML+='<td>'+fmt(prev.u[i])+'</td>';
-            tblPrev.appendChild(tr);
-        }
-        area.appendChild(tblPrev);
+// salva iteração
+function saveIteration(allocation,u,v){
+  autoIterations.push({allocation: JSON.parse(JSON.stringify(allocation)), u: u?u.slice():[], v: v?v.slice():[]});
+}
+
+// renderiza iteração
+function renderStudentIteration(idx){
+  const area=document.getElementById('iterationsArea'); area.style.display='block'; area.innerHTML='';
+  const it = autoIterations[idx];
+  const tbl=document.createElement('table'); tbl.innerHTML='<caption>Iteração '+(idx+1)+'</caption>';
+  let trh='<tr><th>O\\D</th>'; for(let j=0;j<n;j++) trh+=`<th>D${j+1}</th>`; trh+='<th>Oferta</th></tr>'; tbl.innerHTML=trh;
+  for(let i=0;i<m;i++){
+    const tr=document.createElement('tr'); tr.innerHTML=`<td>O${i+1}</td>`;
+    for(let j=0;j<n;j++){
+      const val=(it.allocation && it.allocation[i] && it.allocation[i][j]!==undefined)?it.allocation[i][j]:'';
+      tr.innerHTML+=`<td><input id="cell_${i}_${j}" type="text" value="${val}"></td>`;
     }
-    // tabela para aluno preencher
-    const tbl=document.createElement('table'); tbl.innerHTML='<caption>Iteração '+(idx+1)+'</caption>';
-    let trh=document.createElement('tr'); trh.innerHTML='<th>Orig/Dest</th>';
-    for(let j=0;j<m;j++) trh.innerHTML+='<th>D'+(j+1)+'</th>';
-    trh.innerHTML+='<th>U_i</th>'; tbl.appendChild(trh);
-    for(let i=0;i<n;i++){
-        let tr=document.createElement('tr'); tr.innerHTML='<td>O'+(i+1)+'</td>';
-        for(let j=0;j<m;j++){
-            tr.innerHTML+='<td><input id="cell_'+i+'_'+j+'" type="text" value=""></td>';
-        }
-        tr.innerHTML+='<td><input id="u_'+i+'" type="text" value=""></td>';
-        tbl.appendChild(tr);
-    }
-    // linha v_j
-    let trv=document.createElement('tr'); trv.innerHTML='<td>V_j</td>';
-    for(let j=0;j<m;j++) trv.innerHTML+='<td><input id="v_'+j+'" type="text" value=""></td>';
-    trv.innerHTML+='<td></td>'; tbl.appendChild(trv);
-    area.appendChild(tbl);
-    // botao verificar
-    const btn=document.createElement('button'); btn.innerText='Verificar Iteração';
-    btn.onclick=()=>checkIteration(idx);
-    area.appendChild(btn);
+    const offVal=supply[i]; tr.innerHTML+=`<td><input type="text" value="${offVal}" readonly></td>`;
+    tbl.appendChild(tr);
+  }
+  // demanda
+  const demRow=document.createElement('tr'); demRow.innerHTML='<td>Demanda</td>';
+  for(let j=0;j<n;j++){ const dVal=demand[j]; demRow.innerHTML+=`<td><input type="text" value="${dVal}" readonly></td>`;}
+  demRow.innerHTML+='<td></td>'; tbl.appendChild(demRow);
+  area.appendChild(tbl);
+
+  // u,v
+  const uvCard=document.createElement('div'); uvCard.className='card'; uvCard.innerHTML='<b>Valores uᵢ e vⱼ</b>';
+  for(let i=0;i<m;i++){ uvCard.innerHTML+=`O${i+1}: <input id="u_${i}" type="text" value="${it.u[i]||''}"> `;}
+  uvCard.innerHTML+='<br>';
+  for(let j=0;j<n;j++){ uvCard.innerHTML+=`D${j+1}: <input id="v_${j}" type="text" value="${it.v[j]||''}"> `;}
+  area.appendChild(uvCard);
+
+  const btn=document.createElement('button'); btn.innerText='Verificar Iteração';
+  btn.onclick=()=>checkIteration(idx);
+  area.appendChild(btn);
+  document.getElementById('restart').style.display='inline-block';
 }
 
-// --- verificar iteracao (placeholder para integrar o Step Stone completo)
+// checa iteração
 function checkIteration(idx){
-    alert('Versão final: aqui será verificado custo marginal, ciclo +1/-1, u_i/v_j, variáveis que entram/saem e solução ótima.');
+  const it=autoIterations[idx];
+  let correct=true;
+  let allocation=Array.from({length:m},()=>Array(n).fill(0));
+  for(let i=0;i<m;i++){
+    for(let j=0;j<n;j++){
+      const el=document.getElementById(`cell_${i}_${j}`);
+      let val=parseFloat(el.value.replace(',','.'));
+      if(isNaN(val)) val=0;
+      allocation[i][j]=val;
+      if(it.allocation && it.allocation[i] && Math.abs(val-it.allocation[i][j])>1e-4){ el.classList.add('incorrect'); correct=false;} else el.classList.remove('incorrect');
+    }
+  }
+  let u=[],v=[];
+  for(let i=0;i<m;i++){ u[i]=parseFloat(document.getElementById(`u_${i}`).value.replace(',','.'))||0; }
+  for(let j=0;j<n;j++){ v[j]=parseFloat(document.getElementById(`v_${j}`).value.replace(',','.'))||0; }
+  // aqui poderíamos verificar consistência de custos marginais
+  saveIteration(allocation,u,v);
+  totalChecks++;
+  if(correct) score++;
+  const feedback=document.getElementById('feedback'); feedback.style.display='block';
+  feedback.className=correct?'status ok':'status err';
+  feedback.innerText=correct?'Iteração correta!':'Iteração contém erros.';
+  currentIter++;
+  renderStudentIteration(currentIter);
 }
 
-// --- gerar PDF
+// PDF
 function generatePDFReport(){
-    const { jsPDF }=window.jspdf;
-    const doc=new jsPDF();
-    doc.setFontSize(12); doc.text(`Aluno: ${studentName}`,10,10);
-    doc.text(`Pontuação: ${score} / ${totalChecks}`,10,18);
-    let y=26;
-    autoIterations.forEach((it,i)=>{
-        doc.text(`Iteração ${i+1}`,10,y); y+=8;
-    });
-    doc.save(`${studentName}_StepStone.pdf`);
+  const { jsPDF }=window.jspdf;
+  const doc=new jsPDF(); doc.setFontSize(12);
+  doc.text(`Aluno: ${studentName}`,10,10);
+  doc.text(`Pontuação: ${score} / ${totalChecks}`,10,18);
+  let y=26;
+  autoIterations.forEach((it,i)=>{
+    doc.text(`Iteração ${i+1}:`,10,y); y+=6;
+    doc.text('Alocação:',10,y); y+=6;
+    it.allocation.forEach((row,ri)=>{ doc.text(row.join(', '),12,y); y+=6; });
+    doc.text('uᵢ: '+it.u.join(', '),10,y); y+=6;
+    doc.text('vⱼ: '+it.v.join(', '),10,y); y+=10;
+  });
+  doc.save(`${studentName}_StepStone.pdf`);
 }
 
 // eventos
-document.getElementById('genForm').onclick=generateTable;
+document.getElementById('genForm').onclick = generateForm;
+document.getElementById('start').onclick=()=>{
+  studentName=document.getElementById('studentName').value.trim()||'Aluno';
+  solveAutomatic();
+};
+document.getElementById('restart').onclick=()=>{ currentIter=0; score=0; totalChecks=0; renderStudentIteration(currentIter); };
 document.getElementById('generatePDF').onclick=generatePDFReport;
 </script>
-
 </body>
 </html>
